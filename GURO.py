@@ -4,6 +4,23 @@ import numpy as np
 import math
 
 
+def calc_I_for_vertices(vertices, faces):
+    dic = {}
+    for f in faces:
+        v1, v2, v3 = (vertices[x - 1] for x in f)
+        n = calculate_perpendicular(v1[0], v2[0], v3[0], v1[1], v2[1], v3[1], v1[2], v2[2], v3[2])
+        for v in f:
+            if v in dic:
+                dic[v].append(n)
+            else:
+                dic[v] = [n]
+    for el in dic:
+        dic[el] = np.mean(np.array(dic[el]), axis=0)
+        dic[el] = calculate_cos(dic[el])
+
+    return dic
+
+
 def calculate_bounding_rect(x0, x1, x2, y0, y1, y2, width, height):
     xmin = math.floor(max(min(x0, x1, x2), 0))
     xmax = math.ceil(min(max(x0, x1, x2), width))
@@ -68,29 +85,28 @@ def transform_vertices(v, alpha, beta, gamma, sh_z, sc, tr):
 
 
 if __name__ == "__main__":
-    vertices, faces = parse_obj("model.obj")
+    texture_image = Image.open("bunny-atlas.jpg")
+    vertices, textures, faces = parse_obj("model.obj")
+    I_dic = calc_I_for_vertices(vertices, faces[0])
 
-    # Определить min и max координату для выставления сдвига модели
-    # print(min([el[2] for el in vertices]))
-    # print(max([el[2] for el in vertices]))
-
-    # Чтобы было 3 картинки с разной дальностью до обьекта
-    # можно менять scale и shift_z (3 координата)
-    # Значения для примеров, похожих на лекционные: 0.1/1000 0.2/2000 5/5_000
     width = 2000
     height = 2000
-    scale = 1_000  # тут
-    color = [0, 255, 0]
-    shift_z = 0.1  # и тут
+    texture_width = 1024
+    texture_height = 1024
+    # color = [0, 255, 0]
+    scale = 10000
+    shift_z = 1
     trans = [width // 2, height // 2, 0]
 
-    tr_vertices = transform_vertices(vertices, 0, -20, 0, shift_z, scale, trans)
+    tr_vertices = transform_vertices(vertices, 0, 0, 0, shift_z, scale, trans)
     arr = np.zeros((height, width, 3), dtype=np.uint8)
     z_buffer = np.full((height, width), np.inf, dtype=np.float64)
 
-    for el in faces:
-        v1, v2, v3 = (vertices[x - 1] for x in el)
-        tv1, tv2, tv3 = (tr_vertices[x - 1] for x in el)
+    for i in range(len(faces[0])):
+        v1_num, v2_num, v3_num = [x for x in faces[0][i]]
+        v1, v2, v3 = (vertices[x - 1] for x in faces[0][i])
+        vt1, vt2, vt3 = (textures[x - 1] for x in faces[1][i])
+        tv1, tv2, tv3 = (tr_vertices[x - 1] for x in faces[0][i])
 
         n = calculate_perpendicular(v1[0], v2[0], v3[0], v1[1], v2[1], v3[1], v1[2], v2[2], v3[2])
         cos = calculate_cos(n)
@@ -104,7 +120,15 @@ if __name__ == "__main__":
                     if (l1 >= 0) & (l2 >= 0) & (l3 >= 0):
                         z = l1 * tv1[2] + l2 * tv2[2] + l3 * tv3[2]
                         if z < z_buffer[y, x]:
-                            arr[y, x] = [c * -cos for c in color]
+                            I = l1 * I_dic[v1_num] + l2 * I_dic[v2_num] + l3 * I_dic[v3_num]
+
+                            pixel = (
+                                int((l1 * vt1[0] + l2 * vt2[0] + l3 * vt3[0]) * texture_width),
+                                int((1 - (l1 * vt1[1] + l2 * vt2[1] + l3 * vt3[1])) * texture_height)
+                            )
+
+                            arr[y, x] = [el * -I for el in texture_image.getpixel(pixel)]
+
                             z_buffer[y, x] = z
 
     img = Image.fromarray(arr)
